@@ -153,6 +153,17 @@ namespace infini
         // HINT: 获取分配好的内存指针后，可以调用 tensor 的 setDataBlob 函数给 tensor 绑定内存
         // =================================== 作业 ===================================
 
+        size_t size = 0;
+        for (auto i : tensors) {
+            size += i->size() * i->getDType().getSize();
+        }
+        size_t addr = allocator.alloc(size);
+        for (auto i : tensors) {
+            auto ptr = allocator.getPtr() + addr;
+            i->setDataBlob(make_ref<BlobObj>(runtime, ptr));
+            addr += i->size() * i->getDType().getSize();
+        }
+
         allocator.info();
     }
 

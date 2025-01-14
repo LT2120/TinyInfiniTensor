@@ -33,6 +33,29 @@ namespace infini
         // TODO: 设计一个算法来分配内存，返回起始地址偏移量
         // =================================== 作业 ===================================
 
+        if(free_block.empty()){
+            this->used+=size;
+            this->peak = size;
+            free_block[0+size] = 1000-size;
+        }
+
+        for (auto i = free_block.begin();i!= free_block.end();i++){
+            if(i->second < size){
+                continue;
+            }
+            size_t midAddr = i->first;
+            size_t midAddrS = i->second - size;
+            free_block.erase(i);
+
+            if(midAddrS>0)free_block[midAddr+size] = midAddrS;
+            
+            this->used += size;
+            if(this->peak <this->used){
+                this->peak = this->used;
+            }
+            return midAddr;
+        }
+
         return 0;
     }
 
@@ -44,6 +67,48 @@ namespace infini
         // =================================== 作业 ===================================
         // TODO: 设计一个算法来回收内存
         // =================================== 作业 ===================================
+        this->used -= size;
+
+        size_t midAddr,midAddrS;
+        auto ind = free_block.lower_bound(addr);
+        if(ind == free_block.begin()){
+            if(addr+size == ind->first){
+                midAddrS = ind->second;
+                free_block.erase(ind);
+                free_block[addr] = size+midAddrS;
+                return;
+            }
+        }else if(ind == free_block.end()){
+            --ind;
+            if(addr == ind->first+ind->second){
+                midAddr = ind->first;
+                midAddrS = ind->second;
+                free_block.erase(ind);
+                free_block[midAddr] = size+midAddrS;
+                return;
+
+            }
+        }else{
+            if(addr+size == ind->first){//0001111000 56
+                midAddrS = ind->second;
+                free_block.erase(ind);
+                free_block[addr] = size+midAddrS;
+                return;
+            }else{//0001111000 34
+                --ind;
+                if(addr == ind->first+ind->second){
+                midAddr = ind->first;
+                midAddrS = ind->second;
+                free_block.erase(ind);
+                free_block[midAddr] = size+midAddrS;
+                return;
+                }
+            }
+        }
+
+        free_block[addr] = size;
+        return;
+
     }
 
     void *Allocator::getPtr()
@@ -56,7 +121,7 @@ namespace infini
         return this->ptr;
     }
 
-    size_t Allocator::getAlignedSize(size_t size)
+    size_t Allocator::getAlignedSize(size_t size)//up
     {
         return ((size - 1) / this->alignment + 1) * this->alignment;
     }
