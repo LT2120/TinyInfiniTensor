@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <numeric>
 #include <queue>
+#include "core/op_type.h"
+#include "operators/matmul.h"
+#include "operators/transpose.h"
 
 namespace infini
 {
@@ -106,6 +109,107 @@ namespace infini
         // 1. 去除冗余的算子（例如，两个相邻的算子都是 transpose 算子，且做的是相反的操作，可以将其全部删除）
         // 2. 合并算子（例如，矩阵乘算子中含有属性transA、transB，如果其输入存在transpose，且对最后两个维度做交换，就可以将transpose融入到矩阵乘算子的属性中去）
         // =================================== 作业 ===================================
+        
+        if(this->topo_sort()){//
+            bool optimized = true;
+            while (optimized) {
+                optimized = false;
+
+                for(auto &op:ops){
+                    
+                    if(op->getOpType() == OpType::Transpose){//transpose
+                        for(auto pre : op->getPredecessors()){
+
+                            if(pre->getOpType() == OpType::Transpose){
+                                auto opd = std::dynamic_pointer_cast<TransposeObj>(op);
+                                auto pred = std::dynamic_pointer_cast<TransposeObj>(pre);
+                                
+                                if(opd->getPermute() == pred->getPermute()){//冗余的算子
+                                    
+                                    for(auto prepre : pre->getPredecessors()){
+                                        for(auto p :op->getOutputs()){//adjust pre
+                                            p->setSource(prepre);
+                                        }
+                                    }
+
+                                    for(auto input:pre->getInputs()){
+                                        for(auto next:op->getSuccessors()){
+                                            input->removeTarget(pre);
+                                            input->addTarget(next);
+
+                                            next->removePredecessors(op);
+                                            next->replaceInput(op->getOutput(),input);
+                                        }
+                                    }
+
+                                    for(auto prepre : pre->getPredecessors()){//remove
+                                        prepre->removeSuccessors(pre);
+                                        for(auto next:op->getSuccessors()){
+                                            prepre->addSuccessors(next);
+                                            next->addPredecessors(prepre);
+                                        }
+                                    }
+
+                                    removeTensor(op->getOutput());
+                                    removeTensor(pre->getOutput());
+                                    removeOperator(op);//op first pre second
+                                    removeOperator(pre);
+                                }
+                            }
+                        }
+                    }
+
+                if(op->getOpType() == OpType::MatMul){//matmul
+                    for (auto pre : op->getPredecessors()) {
+                            if (pre->getOpType() == OpType::Transpose){
+                                auto pred = std::dynamic_pointer_cast<TransposeObj>(pre);
+                                auto opd = std::dynamic_pointer_cast<MatmulObj>(op);
+                                auto perm = pred->getPermute();
+                                    
+                                for(int i=0;i < int(perm.size()-2);i++){
+                                    if (perm[i]!=i){
+                                        continue;
+                                    }
+                                }
+
+                                if (perm[perm.size() - 1] - perm[perm.size() - 2] == -1){//最后两个维度做交换
+                                    auto transinput = pre->getInputs()[0];
+                                    auto transoutput = pre->getOutput();
+
+                                    if (transoutput == opd->getInputs()[0]) {
+                                        opd->setTransA(!opd->getTransA());
+                                    } else {
+                                        opd->setTransB(!opd->getTransB());
+                                    }
+
+
+                                    op->removePredecessors(pred);
+                                    for(auto prepre :pred->getPredecessors()){
+                                        prepre->removeSuccessors(pre);
+                                        prepre->addSuccessors(op);
+                                        op->addPredecessors(prepre);
+                                    }
+
+
+                                    transinput->removeTarget(pred);
+                                    transinput->addTarget(op);
+                                    op->replaceInput(transoutput,transinput);
+                                    transoutput->removeTarget(opd);
+
+                                    removeTensor(transoutput);
+                                    removeOperator(pred);
+
+                                    optimized = true;
+                                }
+                                    
+                            }
+                        }
+                        if(optimized) break;
+                    }
+                }
+            }
+        }
+        
     }
 
     Tensor GraphObj::getTensor(int fuid) const
@@ -159,7 +263,7 @@ namespace infini
         }
         size_t addr = allocator.alloc(size);
         for (auto i : tensors) {
-            auto ptr = allocator.getPtr() + addr;
+            auto ptr = static_cast<char*>(allocator.getPtr() )+ addr ;
             i->setDataBlob(make_ref<BlobObj>(runtime, ptr));
             addr += i->size() * i->getDType().getSize();
         }
